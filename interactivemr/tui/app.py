@@ -1,9 +1,12 @@
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
+import gitlab
+from urllib.parse import urlparse
 
 from ..ai import GeminiAI
 from .diff_view import DiffView
+from ..gitlab_client import get_gitlab_instance
 
 
 class InteractiveMRApp(App):
@@ -161,6 +164,29 @@ class InteractiveMRApp(App):
                 f"[bold red]Unknown command:[/bold red] {cmd}"
             )
 
+    def _reauthenticate(self):
+        """Re-authenticates with GitLab and updates the merge request object."""
+        try:
+            # Assuming the gitlab_url can be extracted from the merge_request object
+            parsed_url = urlparse(self.merge_request.web_url)
+            gitlab_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+            new_gl = get_gitlab_instance(gitlab_url)
+            
+            # Re-fetch the project and merge request objects with the new instance
+            project = new_gl.projects.get(self.merge_request.project_id)
+            self.merge_request = project.mergerequests.get(self.merge_request.iid)
+            
+            self.query_one("#ai-suggestion", Static).update(
+                "[bold green]Successfully re-authenticated.[/bold green]"
+            )
+        except Exception as e:
+            self.query_one("#ai-suggestion", Static).update(
+                f"[bold red]Re-authentication failed:[/bold red] {e}"
+            )
+            # Depending on the desired behavior, you might want to quit the app
+            # self.exit()
+
     def post_comment(self, diff, line_num, comment_text):
         """Posts a comment to the GitLab merge request."""
         comment_data = {
@@ -175,17 +201,30 @@ class InteractiveMRApp(App):
             },
         }
 
-        # log_message = f"DRY RUN: Would post comment to MR !{self.merge_request.iid}: {comment_data}"
-        # print(log_message)
-        # self.query_one("#ai-suggestion", Static).update(
-        #     f"[yellow]DRY RUN:[/yellow] Logged comment for line {line_num}: {comment_data}"
-        # )
-        # This is the line you need to add to actually post the comment
-        self.merge_request.discussions.create(comment_data)
-
-        self.query_one("#ai-suggestion", Static).update(
-            f"[green]Success:[/green] Comment posted to line {line_num}."
-        )
+        try:
+            self.merge_request.discussions.create(comment_data)
+            self.query_one("#ai-suggestion", Static).update(
+                f"[green]Success:[/green] Comment posted to line {line_num}."
+            )
+        except gitlab.exceptions.GitlabAuthenticationError:
+            self.query_one("#ai-suggestion", Static).update(
+                "[bold yellow]Authentication failed. Attempting to re-authenticate...[/bold yellow]"
+            )
+            self._reauthenticate()
+            # Retry posting the comment after re-authentication
+            try:
+                self.merge_request.discussions.create(comment_data)
+                self.query_one("#ai-suggestion", Static).update(
+                    f"[green]Success:[/green] Comment posted to line {line_num} after re-authentication."
+                )
+            except gitlab.exceptions.GitlabError as e:
+                self.query_one("#ai-suggestion", Static).update(
+                    f"[bold red]Error:[/bold red] Failed to post comment after re-authentication: {e}"
+                )
+        except gitlab.exceptions.GitlabError as e:
+            self.query_one("#ai-suggestion", Static).update(
+                f"[bold red]Error:[/bold red] Failed to post comment: {e}"
+            )
 
     def action_next_diff(self):
         """Go to the next diff."""

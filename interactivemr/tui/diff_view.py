@@ -69,21 +69,18 @@ class DiffView(Widget):
 
         diff_lines = self.diff_data['diff'].split('\n')
         
-        hunk_header = next((line for line in diff_lines if line.startswith('@@')), None)
-        old_ln_start, new_ln_start = 0, 0
-        if hunk_header:
-            parts = hunk_header.split(' ')
-            if len(parts) > 2:
-                old_ln_start = abs(int(parts[1].split(',')[0]))
-                new_ln_start = abs(int(parts[2].split(',')[0]))
+        current_old_ln = 0
+        current_new_ln = 0
 
-        current_old_ln = old_ln_start
-        current_new_ln = new_ln_start
+        for line in diff_lines:
+            if line.startswith('@@'):
+                parts = line.split(' ')
+                if len(parts) > 2:
+                    current_old_ln = abs(int(parts[1].split(',')[0]))
+                    current_new_ln = abs(int(parts[2].split(',')[0]))
+                continue
 
-        content_lines = [line for line in diff_lines if not line.startswith('@@')]
-
-        for line in content_lines:
-            line_content = line[1:]
+            line_content = line[1:] if len(line) > 0 else ""
             
             if line.startswith('-'):
                 line_text = f"{current_old_ln:<4} {line_content}"
@@ -123,3 +120,37 @@ class DiffView(Widget):
             new_scroll_y = old_pane.scroll_y - self.SCROLL_STEP
             old_pane.scroll_y = new_scroll_y
             new_pane.scroll_y = new_scroll_y
+
+        self.refresh()
+        
+    def get_line_number_for_comment(self, diff_line_index: int) -> int:
+        """
+        Translate a 1-based index from the visible diff content to the
+        actual line number in the new file.
+        """
+        diff_lines = self.diff_data["diff"].split("\n")
+
+        current_new_ln = 0
+        content_line_counter = 0
+
+        for line in diff_lines:
+            if line.startswith("@@"):
+                parts = line.split(" ")
+                if len(parts) > 2:
+                    # Correctly parse the starting line number for the new file
+                    new_ln_str = parts[2].split(",")[0]
+                    current_new_ln = abs(int(new_ln_str))
+                continue
+
+            # Only count lines that appear in the new file view
+            if line.startswith("+") or line.startswith(" "):
+                content_line_counter += 1
+                if content_line_counter == diff_line_index:
+                    return current_new_ln
+                current_new_ln += 1
+            elif line.startswith("-"):
+                # This line does not exist in the new file, so we don't increment
+                # the content line counter or the new line number.
+                pass
+
+        return -1  # Should not be reached for valid inputs
