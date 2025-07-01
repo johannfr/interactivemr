@@ -10,9 +10,10 @@ class InteractiveMRApp(App):
     """The main application for the interactive merge request tool."""
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("n", "next_diff", "Next"),
-        ("p", "prev_diff", "Previous"),
+        ("ctrl+q", "quit", "Quit"),
+        ("alt+right", "next_diff", "Next"),
+        ("alt+left", "prev_diff", "Previous"),
+        ("ctrl+l", "clear_input", "Clear command input"),
     ]
 
     CSS = """
@@ -174,10 +175,16 @@ class InteractiveMRApp(App):
             },
         }
 
-        log_message = f"DRY RUN: Would post comment to MR !{self.merge_request.iid}: {comment_data}"
-        print(log_message)
+        # log_message = f"DRY RUN: Would post comment to MR !{self.merge_request.iid}: {comment_data}"
+        # print(log_message)
+        # self.query_one("#ai-suggestion", Static).update(
+        #     f"[yellow]DRY RUN:[/yellow] Logged comment for line {line_num}: {comment_data}"
+        # )
+        # This is the line you need to add to actually post the comment
+        self.merge_request.discussions.create(comment_data)
+
         self.query_one("#ai-suggestion", Static).update(
-            f"[yellow]DRY RUN:[/yellow] Logged comment for line {line_num}."
+            f"[green]Success:[/green] Comment posted to line {line_num}."
         )
 
     def action_next_diff(self):
@@ -194,3 +201,6 @@ class InteractiveMRApp(App):
             self.current_diff_index -= 1
             self.show_current_diff()
 
+    def action_clear_input(self):
+        """Clear the command input-field."""
+        self.query_one("#command-input", Input).value = ""
