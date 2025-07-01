@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from ..ai import GeminiAI
 from .diff_view import DiffView
 from ..gitlab_client import get_gitlab_instance
+from .comment_dialog import CommentDialog
 
 
 class InteractiveMRApp(App):
@@ -71,6 +72,7 @@ class InteractiveMRApp(App):
         self.diffs = diffs
         self.current_diff_index = 0
         self.ai = GeminiAI()
+        self.comments = {}
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -83,8 +85,28 @@ class InteractiveMRApp(App):
         )
         yield Footer()
 
+    def _load_comments(self):
+        """Loads all discussions for the merge request and stores them."""
+        try:
+            discussions = self.merge_request.discussions.list(all=True)
+            for discussion in discussions:
+                for note in discussion.attributes['notes']:
+                    if 'position' in note and note['position']:
+                        pos = note['position']
+                        # We only care about comments on the new path
+                        if pos['new_path']:
+                            key = (pos['new_path'], pos['new_line'])
+                            if key not in self.comments:
+                                self.comments[key] = []
+                            self.comments[key].append(note['body'])
+        except gitlab.exceptions.GitlabError as e:
+            self.query_one("#ai-suggestion", Static).update(
+                f"[bold red]Error loading comments:[/bold red] {e}"
+            )
+
     def on_mount(self) -> None:
         """Called when the app is mounted."""
+        self._load_comments()
         self.show_current_diff()
 
     def show_current_diff(self):
@@ -104,6 +126,7 @@ class InteractiveMRApp(App):
             diff=diff_data,
             current_diff_index=self.current_diff_index,
             total_diffs=len(self.diffs),
+            comments=self.comments,
         )
         container.mount(diff_view)
 
@@ -203,6 +226,12 @@ class InteractiveMRApp(App):
 
         try:
             self.merge_request.discussions.create(comment_data)
+            # Add the comment to our local store and refresh the view
+            key = (diff["new_path"], line_num)
+            if key not in self.comments:
+                self.comments[key] = []
+            self.comments[key].append(comment_text)
+            self.show_current_diff()
             self.query_one("#ai-suggestion", Static).update(
                 f"[green]Success:[/green] Comment posted to line {line_num}."
             )
@@ -214,6 +243,11 @@ class InteractiveMRApp(App):
             # Retry posting the comment after re-authentication
             try:
                 self.merge_request.discussions.create(comment_data)
+                key = (diff["new_path"], line_num)
+                if key not in self.comments:
+                    self.comments[key] = []
+                self.comments[key].append(comment_text)
+                self.show_current_diff()
                 self.query_one("#ai-suggestion", Static).update(
                     f"[green]Success:[/green] Comment posted to line {line_num} after re-authentication."
                 )
@@ -239,6 +273,12 @@ class InteractiveMRApp(App):
         if self.current_diff_index > 0:
             self.current_diff_index -= 1
             self.show_current_diff()
+
+    def action_show_comments(self, file_path: str, line_number: int) -> None:
+        """Show a dialog with comments for the given line number."""
+        comments = self.comments.get((file_path, line_number), [])
+        if comments:
+            self.push_screen(CommentDialog(comments=comments, line_number=line_number))
 
     def action_clear_input(self):
         """Clear the command input-field."""

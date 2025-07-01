@@ -6,6 +6,7 @@ from textual.widget import Widget
 from textual.containers import Horizontal, Vertical
 from textual.events import MouseScrollDown, MouseScrollUp
 from textual.message import Message
+from .comment_dialog import CommentDialog
 
 class SyncedVertical(Vertical):
     """A Vertical container that stops default scrolling and posts a custom sync message."""
@@ -32,7 +33,7 @@ class DiffView(Widget):
 
     SCROLL_STEP = 2
 
-    def __init__(self, diff: dict, current_diff_index: int, total_diffs: int):
+    def __init__(self, diff: dict, current_diff_index: int, total_diffs: int, comments: dict):
         """
         Initialize the DiffView.
 
@@ -40,11 +41,13 @@ class DiffView(Widget):
             diff (dict): A dictionary representing a single file change from the GitLab API.
             current_diff_index (int): The index of the current diff.
             total_diffs (int): The total number of diffs.
+            comments (dict): A dictionary of comments for the merge request.
         """
         super().__init__()
         self.diff_data = diff
         self.current_diff_index = current_diff_index
         self.total_diffs = total_diffs
+        self.comments = comments
 
     def compose(self) -> ComposeResult:
         """Compose the static layout of the diff view."""
@@ -71,6 +74,7 @@ class DiffView(Widget):
         
         current_old_ln = 0
         current_new_ln = 0
+        file_path = self.diff_data.get('new_path')
 
         for line in diff_lines:
             if line.startswith('@@'):
@@ -80,32 +84,39 @@ class DiffView(Widget):
                     current_new_ln = abs(int(parts[2].split(',')[0]))
                 continue
 
-            line_content = line[1:] if len(line) > 0 else ""
+            line_content = escape(line[1:]) if len(line) > 0 else ""
             
+            if (file_path, current_new_ln) in self.comments:
+                comment_indicator = f"[@click=app.show_comments('{file_path}',{current_new_ln})][bold white]C[/bold white][/@click] "
+            else:
+                comment_indicator = "  "
+
             if line.startswith('-'):
                 line_text = f"{current_old_ln:<4} {line_content}"
-                static = Static(Text(line_text))
+                static = Static(Text.from_markup(line_text))
                 static.styles.background = "darkred"
                 old_pane.mount(static)
                 new_pane.mount(Static(" "))
                 current_old_ln += 1
             elif line.startswith('+'):
-                line_text = f"{current_new_ln:<4} {line_content}"
-                static = Static(Text(line_text))
+                line_text = f"{current_new_ln:<4}{comment_indicator}{line_content}"
+                static = Static(Text.from_markup(line_text))
                 static.styles.background = "darkgreen"
                 new_pane.mount(static)
                 old_pane.mount(Static(" "))
                 current_new_ln += 1
             elif line.startswith(' '): 
                 old_line_text = f"{current_old_ln:<4} {line_content}"
-                new_line_text = f"{current_new_ln:<4} {line_content}"
-                old_pane.mount(Static(Text(old_line_text)))
-                new_pane.mount(Static(Text(new_line_text)))
+                new_line_text = f"{current_new_ln:<4}{comment_indicator}{line_content}"
+                old_pane.mount(Static(Text.from_markup(old_line_text)))
+                new_pane.mount(Static(Text.from_markup(new_line_text)))
                 current_old_ln += 1
                 current_new_ln += 1
             else:
                 old_pane.mount(Static(Text(line)))
                 new_pane.mount(Static(Text(line)))
+
+    
 
     def on_synced_vertical_sync_scroll(self, message: SyncedVertical.SyncScroll) -> None:
         """Handles the custom scroll event to scroll both panes by a fixed step."""
