@@ -1,6 +1,8 @@
 import os
+
 import google.generativeai as genai
 from dotenv import load_dotenv
+
 
 class GeminiAI:
     """A class to handle interactions with the Gemini API."""
@@ -11,8 +13,8 @@ class GeminiAI:
         if not api_key:
             raise ValueError("GEMINI_API_KEY must be set in your .env file.")
         genai.configure(api_key=api_key)
-        self.model = 'models/embedding-001'
-        self.learned_embeddings = [] # Simple in-memory storage for now
+        self.model = "models/embedding-001"
+        self.learned_embeddings = []  # Simple in-memory storage for now
 
     def get_embedding(self, text: str) -> list[float]:
         """
@@ -26,7 +28,7 @@ class GeminiAI:
         """
         try:
             result = genai.embed_content(model=self.model, content=text)
-            return result['embedding']
+            return result["embedding"]
         except Exception as e:
             print(f"Error getting embedding: {e}")
             return []
@@ -41,13 +43,12 @@ class GeminiAI:
         """
         embedding = self.get_embedding(chunk_text)
         if embedding:
-            self.learned_embeddings.append({
-                "embedding": embedding,
-                "comment": comment
-            })
+            self.learned_embeddings.append({"embedding": embedding, "comment": comment})
             print("Successfully learned new chunk.")
 
-    def find_similar_chunk(self, chunk_text: str, threshold: float = 0.8) -> dict | None:
+    def find_similar_chunk(
+        self, chunk_text: str, threshold: float = 0.8
+    ) -> dict | None:
         """
         Finds a similar learned chunk.
 
@@ -69,9 +70,9 @@ class GeminiAI:
 
         for learned in self.learned_embeddings:
             # Using dot product for similarity, assuming embeddings are normalized
-            similarity = np.dot(new_embedding, learned['embedding'])
+            similarity = np.dot(new_embedding, learned["embedding"])
             if similarity > threshold:
                 print(f"Found similar chunk with similarity: {similarity:.2f}")
                 return learned
-        
+
         return None

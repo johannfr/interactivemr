@@ -1,12 +1,11 @@
+from urllib.parse import urlparse
+
 import click
 import gitlab
 import requests
-from urllib.parse import urlparse
 
-from .tui.app import InteractiveMRApp
 from .gitlab_client import get_gitlab_instance
-
-
+from .tui.app import InteractiveMRApp
 
 
 @click.command()

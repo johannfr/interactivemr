@@ -1,13 +1,14 @@
+from urllib.parse import urlparse
+
+import gitlab
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
-import gitlab
-from urllib.parse import urlparse
 
 from ..ai import GeminiAI
-from .diff_view import DiffView
 from ..gitlab_client import get_gitlab_instance
 from .comment_dialog import CommentDialog
+from .diff_view import DiffView
 
 
 class InteractiveMRApp(App):
@@ -101,18 +102,18 @@ class InteractiveMRApp(App):
         try:
             discussions = self.merge_request.discussions.list(all=True)
             for discussion in discussions:
-                for note in discussion.attributes['notes']:
-                    if 'position' in note and note['position']:
-                        pos = note['position']
+                for note in discussion.attributes["notes"]:
+                    if "position" in note and note["position"]:
+                        pos = note["position"]
                         # We only care about comments on the new path
-                        if pos['new_path']:
-                            key = (pos['new_path'], pos['new_line'])
+                        if pos["new_path"]:
+                            key = (pos["new_path"], pos["new_line"])
                             if key not in self.comments:
                                 self.comments[key] = []
                             self.comments[key].append(
                                 {
-                                    "body": note['body'],
-                                    "author": note['author']['name'],
+                                    "body": note["body"],
+                                    "author": note["author"]["name"],
                                 }
                             )
         except gitlab.exceptions.GitlabError as e:
@@ -212,11 +213,11 @@ class InteractiveMRApp(App):
             gitlab_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
             new_gl = get_gitlab_instance(gitlab_url)
-            
+
             # Re-fetch the project and merge request objects with the new instance
             project = new_gl.projects.get(self.merge_request.project_id)
             self.merge_request = project.mergerequests.get(self.merge_request.iid)
-            
+
             self.query_one("#ai-suggestion", Static).update(
                 "[bold green]Successfully re-authenticated.[/bold green]"
             )

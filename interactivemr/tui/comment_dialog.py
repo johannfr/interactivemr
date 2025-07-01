@@ -1,3 +1,4 @@
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Grid
 from textual.screen import Screen
@@ -14,7 +15,7 @@ class CommentDialog(Screen):
 
     def compose(self) -> ComposeResult:
         comment_texts = [
-            f"[bold]{c['author']}:[/bold] {c['body']}" for c in self.comments
+            f"[bold]{c['author']}:[/bold] {escape(c['body'])}" for c in self.comments
         ]
         yield Grid(
             Static(f"Comments for line {self.line_number}", id="comment-dialog-title"),
@@ -33,8 +34,8 @@ class CommentDialog(Screen):
         grid-gutter: 1 2;
         grid-rows: 1fr 3;
         padding: 0 1;
-        width: 80%;
-        height: 80%;
+        width: 100%;
+        height: 100%;
         border: thick $primary 80%;
         background: $surface;
     }
@@ -55,4 +56,3 @@ class CommentDialog(Screen):
         width: 100%;
     }
     """
-
