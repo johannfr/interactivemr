@@ -73,6 +73,7 @@ class InteractiveMRApp(App):
         self.current_diff_index = 0
         self.ai = GeminiAI()
         self.comments = {}
+        self.user = None
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -84,6 +85,16 @@ class InteractiveMRApp(App):
             id="command-input",
         )
         yield Footer()
+
+    def _get_user(self):
+        """Gets the current user from the GitLab instance."""
+        if not self.user:
+            try:
+                self.user = self.merge_request.manager.gitlab.user
+            except gitlab.exceptions.GitlabError as e:
+                self.query_one("#ai-suggestion", Static).update(
+                    f"[bold red]Error getting user:[/bold red] {e}"
+                )
 
     def _load_comments(self):
         """Loads all discussions for the merge request and stores them."""
@@ -98,7 +109,12 @@ class InteractiveMRApp(App):
                             key = (pos['new_path'], pos['new_line'])
                             if key not in self.comments:
                                 self.comments[key] = []
-                            self.comments[key].append(note['body'])
+                            self.comments[key].append(
+                                {
+                                    "body": note['body'],
+                                    "author": note['author']['name'],
+                                }
+                            )
         except gitlab.exceptions.GitlabError as e:
             self.query_one("#ai-suggestion", Static).update(
                 f"[bold red]Error loading comments:[/bold red] {e}"
@@ -106,6 +122,7 @@ class InteractiveMRApp(App):
 
     def on_mount(self) -> None:
         """Called when the app is mounted."""
+        self._get_user()
         self._load_comments()
         self.show_current_diff()
 
@@ -230,7 +247,9 @@ class InteractiveMRApp(App):
             key = (diff["new_path"], line_num)
             if key not in self.comments:
                 self.comments[key] = []
-            self.comments[key].append(comment_text)
+            self.comments[key].append(
+                {"body": comment_text, "author": self.user.name if self.user else "You"}
+            )
             self.show_current_diff()
             self.query_one("#ai-suggestion", Static).update(
                 f"[green]Success:[/green] Comment posted to line {line_num}."
@@ -246,7 +265,12 @@ class InteractiveMRApp(App):
                 key = (diff["new_path"], line_num)
                 if key not in self.comments:
                     self.comments[key] = []
-                self.comments[key].append(comment_text)
+                self.comments[key].append(
+                    {
+                        "body": comment_text,
+                        "author": self.user.name if self.user else "You",
+                    }
+                )
                 self.show_current_diff()
                 self.query_one("#ai-suggestion", Static).update(
                     f"[green]Success:[/green] Comment posted to line {line_num} after re-authentication."
