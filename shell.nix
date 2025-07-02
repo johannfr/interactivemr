@@ -6,12 +6,10 @@ pkgs.mkShell {
       python-gitlab
       textual
       click
-      google-generativeai
       python-dotenv
       rich # For syntax highlighting, also a textual dependency
       requests
       pygments
-      numpy
       fuzzywuzzy
     ]))
   ];

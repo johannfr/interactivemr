@@ -5,7 +5,6 @@ from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
 
-from ..ai import GeminiAI
 from ..gitlab_client import get_gitlab_instance
 from .comment_dialog import CommentDialog
 from .diff_view import DiffView
@@ -72,7 +71,6 @@ class InteractiveMRApp(App):
         self.merge_request = merge_request
         self.diffs = diffs
         self.current_diff_index = 0
-        self.ai = GeminiAI()
         self.comments = {}
         self.user = None
 
@@ -80,7 +78,7 @@ class InteractiveMRApp(App):
         """Create child widgets for the app."""
         yield Header()
         with Container(id="main-container"):
-            yield Static(id="ai-suggestion")
+            yield Static(id="status-field")
         yield Input(
             placeholder="Enter command (y, yl, c <line> <comment>, cl <line> <comment>)",
             id="command-input",
@@ -93,7 +91,7 @@ class InteractiveMRApp(App):
             try:
                 self.user = self.merge_request.manager.gitlab.user
             except gitlab.exceptions.GitlabError as e:
-                self.query_one("#ai-suggestion", Static).update(
+                self.query_one("#status-field", Static).update(
                     f"[bold red]Error getting user:[/bold red] {e}"
                 )
 
@@ -117,7 +115,7 @@ class InteractiveMRApp(App):
                                 }
                             )
         except gitlab.exceptions.GitlabError as e:
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 f"[bold red]Error loading comments:[/bold red] {e}"
             )
 
@@ -149,20 +147,6 @@ class InteractiveMRApp(App):
         )
         container.mount(diff_view)
 
-        suggestion = self.ai.find_similar_chunk(diff_data["diff"])
-        suggestion_widget = self.query_one("#ai-suggestion", Static)
-        if suggestion:
-            if suggestion["comment"]:
-                suggestion_widget.update(
-                    f"[bold green]AI Suggestion:[/bold green] Previously learned comment: '{suggestion['comment']}'"
-                )
-            else:
-                suggestion_widget.update(
-                    "[bold green]AI Suggestion:[/bold green] This change looks similar to one you've approved before."
-                )
-        else:
-            suggestion_widget.update("")
-
         self.query_one("#command-input", Input).value = ""
         self.query_one("#command-input").focus()
 
@@ -179,30 +163,25 @@ class InteractiveMRApp(App):
 
         if cmd == "y":
             self.action_next_diff()
-        elif cmd == "yl":
-            self.ai.learn_chunk(current_diff["diff"])
-            self.action_next_diff()
         elif cmd == "c":
             if len(parts) < 3:
-                self.query_one("#ai-suggestion", Static).update(
+                self.query_one("#status-field", Static).update(
                     "[bold red]Error:[/bold red] 'c' command requires a line number and a comment."
                 )
                 return
             line_num = int(parts[1])
             comment = parts[2]
             self.post_comment(current_diff, line_num, comment)
-        elif cmd == "cl":
-            if len(parts) < 3:
-                self.query_one("#ai-suggestion", Static).update(
-                    "[bold red]Error:[/bold red] 'cl' command requires a line number and a comment."
+        elif cmd == "g":
+            if len(parts) < 2:
+                self.query_one("#status-field", Static).update(
+                    "[bold red]Error:[/bold red] 'g' command requires a diff-number."
                 )
                 return
-            line_num = int(parts[1])
-            comment = parts[2]
-            self.ai.learn_chunk(current_diff["diff"], comment=comment)
-            self.post_comment(current_diff, line_num, comment)
+            goto_diff_number = int(parts[1])
+            self.action_goto_diff(goto_diff_number)
         else:
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 f"[bold red]Unknown command:[/bold red] {cmd}"
             )
 
@@ -219,11 +198,11 @@ class InteractiveMRApp(App):
             project = new_gl.projects.get(self.merge_request.project_id)
             self.merge_request = project.mergerequests.get(self.merge_request.iid)
 
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 "[bold green]Successfully re-authenticated.[/bold green]"
             )
         except Exception as e:
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 f"[bold red]Re-authentication failed:[/bold red] {e}"
             )
             # Depending on the desired behavior, you might want to quit the app
@@ -253,11 +232,11 @@ class InteractiveMRApp(App):
                 {"body": comment_text, "author": self.user.name if self.user else "You"}
             )
             self.show_current_diff()
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 f"[green]Success:[/green] Comment posted to line {line_num}."
             )
         except gitlab.exceptions.GitlabAuthenticationError:
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 "[bold yellow]Authentication failed. Attempting to re-authenticate...[/bold yellow]"
             )
             self._reauthenticate()
@@ -274,15 +253,15 @@ class InteractiveMRApp(App):
                     }
                 )
                 self.show_current_diff()
-                self.query_one("#ai-suggestion", Static).update(
+                self.query_one("#status-field", Static).update(
                     f"[green]Success:[/green] Comment posted to line {line_num} after re-authentication."
                 )
             except gitlab.exceptions.GitlabError as e:
-                self.query_one("#ai-suggestion", Static).update(
+                self.query_one("#status-field", Static).update(
                     f"[bold red]Error:[/bold red] Failed to post comment after re-authentication: {e}"
                 )
         except gitlab.exceptions.GitlabError as e:
-            self.query_one("#ai-suggestion", Static).update(
+            self.query_one("#status-field", Static).update(
                 f"[bold red]Error:[/bold red] Failed to post comment: {e}"
             )
 
@@ -291,14 +270,36 @@ class InteractiveMRApp(App):
         if self.current_diff_index < len(self.diffs) - 1:
             self.current_diff_index += 1
             self.show_current_diff()
+            self.query_one("#status-field", Static).update("")
         else:
-            self.query_one("#ai-suggestion", Static).update("All diffs reviewed.")
+            self.query_one("#status-field", Static).update("All diffs reviewed.")
 
     def action_prev_diff(self):
         """Go to the previous diff."""
         if self.current_diff_index > 0:
             self.current_diff_index -= 1
             self.show_current_diff()
+            self.query_one("#status-field", Static).update("")
+        else:
+            self.query_one("#status-field", Static).update(
+                "You are already at the beginning."
+            )
+
+    def action_goto_diff(self, diff_number_to_go_to):
+        # Adjust for zero-based indexing as internal lists are 0-indexed.
+        target_index = diff_number_to_go_to - 1
+
+        # Check if the target index is within the valid range of diffs.
+        if 0 <= target_index < len(self.diffs):
+            self.current_diff_index = target_index
+            self.show_current_diff()
+            # Clear any previous status messages.
+            self.query_one("#status-field", Static).update("")
+        else:
+            # Display an error for an out-of-range diff number.
+            self.query_one("#status-field", Static).update(
+                f"[bold red]Error:[/bold red] Diff number {diff_number_to_go_to} is invalid."
+            )
 
     def action_show_comments(self, file_path: str, line_number: int) -> None:
         """Show a dialog with comments for the given line number."""
