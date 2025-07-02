@@ -1,3 +1,7 @@
+from dataclasses import dataclass, field
+from re import sub
+
+from fuzzywuzzy import fuzz
 from pygments.lexers import get_lexer_for_filename
 from pygments.styles import get_style_by_name
 from rich.markup import escape
@@ -11,6 +15,38 @@ from textual.widget import Widget
 from textual.widgets import Rule, Static
 
 from .comment_dialog import CommentDialog
+
+FUZZY_THRESHOLD = 60
+
+
+@dataclass
+class DiffHunk:
+    """Represents a single 'hunk' of changes in a diff."""
+
+    header: str
+    lines: list[tuple[str, str]] = field(default_factory=list)
+
+
+def prepare_string_for_comparison(text_string: str) -> str:
+    """
+    Prepares a string for comparison by:
+    1. Converting to lowercase.
+    2. Removing common programming language specific noise (e.g., semicolons, curly braces, parentheses).
+    3. Removing all punctuation.
+    4. Normalizing whitespace (replacing multiple spaces with a single space, stripping leading/trailing).
+
+    Args:
+        text_string: The input string (e.g., a line of code).
+
+    Returns:
+        A cleaned string suitable for comparison.
+    """
+    cleaned_string = text_string.lower()
+    cleaned_string = sub(r"[;(){}\[\].:,=+\-*/%&|^!~<>]", " ", cleaned_string)
+    cleaned_string = sub(r"[^a-z0-9\s]", "", cleaned_string)
+    cleaned_string = sub(r"\s+", " ", cleaned_string).strip()
+
+    return cleaned_string
 
 
 class SyncedVertical(Vertical):
@@ -37,7 +73,7 @@ class SyncedVertical(Vertical):
 class DiffView(Widget):
     """A widget to display a simple, side-by-side diff with synchronized scrolling."""
 
-    SCROLL_STEP = 2
+    SCROLL_STEP = 1
 
     def __init__(
         self, diff: dict, current_diff_index: int, total_diffs: int, comments: dict
@@ -56,6 +92,27 @@ class DiffView(Widget):
         self.current_diff_index = current_diff_index
         self.total_diffs = total_diffs
         self.comments = comments
+
+    def _parse_diff_to_hunks(self, diff_text: str) -> list[DiffHunk]:
+        """Parses a raw diff string into a list of DiffHunk objects."""
+        hunks = []
+        current_hunk = None
+        lines = diff_text.split("\n")
+
+        for line in lines:
+            if line.startswith("@@"):
+                if current_hunk:
+                    hunks.append(current_hunk)
+                current_hunk = DiffHunk(header=line)
+            elif current_hunk and (
+                line.startswith("-") or line.startswith("+") or line.startswith(" ")
+            ):
+                current_hunk.lines.append((line[0], line[1:]))
+
+        if current_hunk:
+            hunks.append(current_hunk)
+
+        return hunks
 
     def compose(self) -> ComposeResult:
         """Compose the static layout of the diff view."""
@@ -78,93 +135,196 @@ class DiffView(Widget):
         old_pane.mount(Static("[bold]Old[/bold]", classes="diff-header-panes"))
         new_pane.mount(Static("[bold]New[/bold]", classes="diff-header-panes"))
 
-        diff_lines = self.diff_data["diff"].split("\n")
-
-        current_old_ln = 0
-        current_new_ln = 0
+        hunks = self._parse_diff_to_hunks(self.diff_data["diff"])
         file_path = self.diff_data.get("new_path")
 
         try:
             lexer = get_lexer_for_filename(file_path)
-            style = get_style_by_name("monokai")
+            style = get_style_by_name("gruvbox-dark")
         except Exception:
             lexer = None
             style = None
 
-        for diff_line_number, diff_line in enumerate(diff_lines):
-            if diff_line.startswith("@@"):
-                if diff_line_number > 0:
-                    old_pane.mount(Rule())
-                    new_pane.mount(Rule())
-                parts = diff_line.split(" ")
-                if len(parts) > 2:
-                    current_old_ln = abs(int(parts[1].split(",")[0]))
-                    current_new_ln = abs(int(parts[2].split(",")[0]))
-                continue
+        current_old_ln = 0
+        current_new_ln = 0
 
-            line_content = diff_line[1:] if len(diff_line) > 0 else ""
-            line_content = line_content.rstrip()
+        for i, hunk in enumerate(hunks):
+            if i > 0:
+                old_pane.mount(Rule())
+                new_pane.mount(Rule())
 
-            if (file_path, current_new_ln) in self.comments:
-                comment_indicator = f"[@click=app.show_comments('{file_path}',{current_new_ln})][bold white]C[/bold white][/@click] "
-            else:
-                comment_indicator = "  "
+            parts = hunk.header.split(" ")
+            if len(parts) > 2:
+                current_old_ln = abs(int(parts[1].split(",")[0]))
+                current_new_ln = abs(int(parts[2].split(",")[0]))
 
-            if diff_line.startswith("-"):
-                line_text = f"{current_old_ln:<4} {escape(line_content)}"
-                static = Static(Text.from_markup(line_text))
-                static.styles.background = "darkred"
-                old_pane.mount(static)
-                new_pane.mount(Static(" "))
-                current_old_ln += 1
-            elif diff_line.startswith("+"):
-                line_text = (
-                    f"{current_new_ln:<4}{comment_indicator}{escape(line_content)}"
-                )
-                static = Static(Text.from_markup(line_text))
-                static.styles.background = "darkgreen"
-                new_pane.mount(static)
-                old_pane.mount(Static(" "))
-                current_new_ln += 1
-            elif diff_line.startswith(" ") and lexer and style:
+            line_idx = 0
+            while line_idx < len(hunk.lines):
+                line_type, line_content = hunk.lines[line_idx]
 
-                def get_rich_text(line_number, content, indicator="  "):
-                    text = Text(f"{line_number:<4}{indicator}")
-                    tokens = list(lexer.get_tokens(content))
-                    if tokens and tokens[-1][1] == "\n":
-                        tokens.pop()
-
-                    for token, text_val in tokens:
-                        pygments_style = style.style_for_token(token)
-                        color = pygments_style["color"]
-                        if color:
-                            color = f"#{color}"
-                        rich_style = Style(
-                            color=color,
-                            bold=pygments_style["bold"],
-                            italic=pygments_style["italic"],
-                        )
-                        text_val = text_val.replace("\n", "")
-                        text.append(text_val, style=rich_style)
-                    return text
-
-                old_pane.mount(Static(get_rich_text(current_old_ln, line_content)))
-                new_pane.mount(
-                    Static(
-                        get_rich_text(current_new_ln, line_content, comment_indicator)
+                if line_type == " ":
+                    comment_indicator = self._get_comment_indicator(
+                        file_path, current_new_ln
                     )
-                )
-                current_old_ln += 1
-                current_new_ln += 1
-            else:  # Unchanged line but no lexer found
-                old_line_text = f"{current_old_ln:<4} {escape(line_content)}"
-                new_line_text = (
-                    f"{current_new_ln:<4}{comment_indicator}{escape(line_content)}"
-                )
-                old_pane.mount(Static(Text.from_markup(old_line_text)))
-                new_pane.mount(Static(Text.from_markup(new_line_text)))
-                current_old_ln += 1
-                current_new_ln += 1
+                    if lexer and style:
+                        old_pane.mount(
+                            Static(
+                                self._get_rich_text(
+                                    current_old_ln, line_content, lexer, style
+                                )
+                            )
+                        )
+                        new_pane.mount(
+                            Static(
+                                self._get_rich_text(
+                                    current_new_ln,
+                                    line_content,
+                                    lexer,
+                                    style,
+                                    indicator=comment_indicator,
+                                )
+                            )
+                        )
+                    else:
+                        old_text = (
+                            f"{current_old_ln:<4} {escape(line_content.rstrip())}"
+                        )
+                        new_text = f"{current_new_ln:<4}{comment_indicator}{escape(line_content.rstrip())}"
+                        old_pane.mount(Static(Text.from_markup(old_text)))
+                        new_pane.mount(Static(Text.from_markup(new_text)))
+
+                    current_old_ln += 1
+                    current_new_ln += 1
+                    line_idx += 1
+                    continue
+
+                if line_type == "+":
+                    comment_indicator = self._get_comment_indicator(
+                        file_path, current_new_ln
+                    )
+                    new_text = f"{current_new_ln:<4}{comment_indicator}{escape(line_content.rstrip())}"
+                    new_static = Static(Text.from_markup(new_text))
+                    new_static.styles.background = "darkgreen"
+                    new_pane.mount(new_static)
+                    old_pane.mount(Static(" "))
+                    current_new_ln += 1
+                    line_idx += 1
+                    continue
+
+                # This must be a '-' line, indicating a change block.
+                removed_lines = []
+                added_lines = []
+
+                # Collect all consecutive '-' lines
+                temp_idx = line_idx
+                while temp_idx < len(hunk.lines) and hunk.lines[temp_idx][0] == "-":
+                    removed_lines.append(hunk.lines[temp_idx][1])
+                    temp_idx += 1
+
+                # Collect all immediately following consecutive '+' lines
+                while temp_idx < len(hunk.lines) and hunk.lines[temp_idx][0] == "+":
+                    added_lines.append(hunk.lines[temp_idx][1])
+                    temp_idx += 1
+
+                # Process the collected change blocks
+                removed_ptr, added_ptr = 0, 0
+                while removed_ptr < len(removed_lines) and added_ptr < len(added_lines):
+                    removed_line = removed_lines[removed_ptr]
+                    added_line = added_lines[added_ptr]
+                    clean_removed = prepare_string_for_comparison(removed_line)
+                    clean_added = prepare_string_for_comparison(added_line)
+
+                    if (
+                        fuzz.token_sort_ratio(clean_removed, clean_added)
+                        > FUZZY_THRESHOLD
+                    ):
+                        # Matched change: display side-by-side
+                        old_text = (
+                            f"{current_old_ln:<4} {escape(removed_line.rstrip())}"
+                        )
+                        old_static = Static(Text.from_markup(old_text))
+                        old_static.styles.background = "darkred"
+                        old_pane.mount(old_static)
+
+                        comment_indicator = self._get_comment_indicator(
+                            file_path, current_new_ln
+                        )
+                        new_text = f"{current_new_ln:<4}{comment_indicator}{escape(added_line.rstrip())}"
+                        new_static = Static(Text.from_markup(new_text))
+                        new_static.styles.background = "darkgreen"
+                        new_pane.mount(new_static)
+
+                        current_old_ln += 1
+                        current_new_ln += 1
+                        removed_ptr += 1
+                        added_ptr += 1
+                    else:
+                        # No match: display as a pure deletion for now
+                        old_text = (
+                            f"{current_old_ln:<4} {escape(removed_line.rstrip())}"
+                        )
+                        old_static = Static(Text.from_markup(old_text))
+                        old_static.styles.background = "darkred"
+                        old_pane.mount(old_static)
+                        new_pane.mount(Static(" "))
+                        current_old_ln += 1
+                        removed_ptr += 1
+
+                # Display any remaining removed lines
+                while removed_ptr < len(removed_lines):
+                    removed_line = removed_lines[removed_ptr]
+                    old_text = f"{current_old_ln:<4} {escape(removed_line.rstrip())}"
+                    old_static = Static(Text.from_markup(old_text))
+                    old_static.styles.background = "darkred"
+                    old_pane.mount(old_static)
+                    new_pane.mount(Static(" "))
+                    current_old_ln += 1
+                    removed_ptr += 1
+
+                # Display any remaining added lines
+                while added_ptr < len(added_lines):
+                    added_line = added_lines[added_ptr]
+                    comment_indicator = self._get_comment_indicator(
+                        file_path, current_new_ln
+                    )
+                    new_text = f"{current_new_ln:<4}{comment_indicator}{escape(added_line.rstrip())}"
+                    new_static = Static(Text.from_markup(new_text))
+                    new_static.styles.background = "darkgreen"
+                    new_pane.mount(new_static)
+                    old_pane.mount(Static(" "))
+                    current_new_ln += 1
+                    added_ptr += 1
+
+                line_idx = temp_idx
+
+    def _get_comment_indicator(self, file_path: str, line_number: int) -> str:
+        """Returns a comment indicator if a comment exists for the given line."""
+        if (file_path, line_number) in self.comments:
+            return f"[@click=app.show_comments('{file_path}',{line_number})][bold white]C[/bold white][/@click] "
+        return "  "
+
+    def _get_rich_text(
+        self, line_number, content, lexer, style, indicator="  "
+    ) -> Text:
+        """Applies syntax highlighting to a line of code."""
+        text = Text(f"{line_number:<4}{indicator}")
+        tokens = list(lexer.get_tokens(content))
+        if tokens and tokens[-1][1] == "\n":
+            tokens.pop()
+
+        for token, text_val in tokens:
+            pygments_style = style.style_for_token(token)
+            color = pygments_style["color"]
+            if color:
+                color = f"#{color}"
+            rich_style = Style(
+                color=color,
+                bold=pygments_style["bold"],
+                italic=pygments_style["italic"],
+            )
+            text_val = text_val.replace("\n", "")
+            text.append(text_val, style=rich_style)
+        return text
 
     def on_synced_vertical_sync_scroll(
         self, message: SyncedVertical.SyncScroll

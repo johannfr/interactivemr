@@ -123,6 +123,7 @@ class InteractiveMRApp(App):
 
     def on_mount(self) -> None:
         """Called when the app is mounted."""
+        self.theme = "gruvbox"
         self._get_user()
         self._load_comments()
         self.show_current_diff()

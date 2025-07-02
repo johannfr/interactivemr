@@ -12,6 +12,7 @@ pkgs.mkShell {
       requests
       pygments
       numpy
+      fuzzywuzzy
     ]))
   ];
   shellHook = ''
