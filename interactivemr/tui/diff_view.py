@@ -1,6 +1,3 @@
-from dataclasses import dataclass, field
-from re import sub
-
 from fuzzywuzzy import fuzz
 from pygments.lexers import get_lexer_for_filename
 from pygments.styles import get_style_by_name
@@ -15,38 +12,9 @@ from textual.widget import Widget
 from textual.widgets import Rule, Static
 
 from .comment_dialog import CommentDialog
+from .diff_parser import parse_diff_to_hunks, prepare_string_for_comparison
 
 FUZZY_THRESHOLD = 60
-
-
-@dataclass
-class DiffHunk:
-    """Represents a single 'hunk' of changes in a diff."""
-
-    header: str
-    lines: list[tuple[str, str]] = field(default_factory=list)
-
-
-def prepare_string_for_comparison(text_string: str) -> str:
-    """
-    Prepares a string for comparison by:
-    1. Converting to lowercase.
-    2. Removing common programming language specific noise (e.g., semicolons, curly braces, parentheses).
-    3. Removing all punctuation.
-    4. Normalizing whitespace (replacing multiple spaces with a single space, stripping leading/trailing).
-
-    Args:
-        text_string: The input string (e.g., a line of code).
-
-    Returns:
-        A cleaned string suitable for comparison.
-    """
-    cleaned_string = text_string.lower()
-    cleaned_string = sub(r"[;(){}\[\].:,=+\-*/%&|^!~<>]", " ", cleaned_string)
-    cleaned_string = sub(r"[^a-z0-9\s]", "", cleaned_string)
-    cleaned_string = sub(r"\s+", " ", cleaned_string).strip()
-
-    return cleaned_string
 
 
 class SyncedVertical(Vertical):
@@ -93,27 +61,6 @@ class DiffView(Widget):
         self.total_diffs = total_diffs
         self.comments = comments
 
-    def _parse_diff_to_hunks(self, diff_text: str) -> list[DiffHunk]:
-        """Parses a raw diff string into a list of DiffHunk objects."""
-        hunks = []
-        current_hunk = None
-        lines = diff_text.split("\n")
-
-        for line in lines:
-            if line.startswith("@@"):
-                if current_hunk:
-                    hunks.append(current_hunk)
-                current_hunk = DiffHunk(header=line)
-            elif current_hunk and (
-                line.startswith("-") or line.startswith("+") or line.startswith(" ")
-            ):
-                current_hunk.lines.append((line[0], line[1:]))
-
-        if current_hunk:
-            hunks.append(current_hunk)
-
-        return hunks
-
     def compose(self) -> ComposeResult:
         """Compose the static layout of the diff view."""
         file_path = escape(self.diff_data.get("new_path", "Unknown file"))
@@ -135,7 +82,7 @@ class DiffView(Widget):
         old_pane.mount(Static("[bold]Old[/bold]", classes="diff-header-panes"))
         new_pane.mount(Static("[bold]New[/bold]", classes="diff-header-panes"))
 
-        hunks = self._parse_diff_to_hunks(self.diff_data["diff"])
+        hunks = parse_diff_to_hunks(self.diff_data["diff"])
         file_path = self.diff_data.get("new_path")
 
         try:
@@ -228,7 +175,9 @@ class DiffView(Widget):
 
                 # Process the collected change blocks
                 removed_ptr, added_ptr = 0, 0
-                while removed_ptr < len(removed_lines) and added_ptr < len(added_lines):
+                while removed_ptr < len(removed_lines) and added_ptr < len(
+                    added_lines
+                ):
                     removed_line = removed_lines[removed_ptr]
                     added_line = added_lines[added_ptr]
                     clean_removed = prepare_string_for_comparison(removed_line)
