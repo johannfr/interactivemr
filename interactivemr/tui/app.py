@@ -80,7 +80,7 @@ class InteractiveMRApp(App):
         with Container(id="main-container"):
             yield Static(id="status-field")
         yield Input(
-            placeholder="Enter command (y, yl, c <line> <comment>, cl <line> <comment>)",
+            placeholder="Enter command (y, c <line> <comment>, g <diff-number>)",
             id="command-input",
         )
         yield Footer()
