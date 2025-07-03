@@ -28,9 +28,11 @@ def main(url, mr):
 
         project = gl.projects.get(project_path)
         merge_request = project.mergerequests.get(mr)
-        changes = merge_request.changes()
+        changes = merge_request.diffs
+        latest_change = changes.list()[0]  # Hopefully they keep the same order.
+        latest_diffs = changes.get(latest_change.id)
 
-        app = InteractiveMRApp(merge_request=merge_request, diffs=changes["changes"])
+        app = InteractiveMRApp(merge_request=merge_request, diffs=latest_diffs.diffs)
         app.run()
 
     except gitlab.exceptions.GitlabError as e:
