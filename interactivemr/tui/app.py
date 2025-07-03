@@ -1,3 +1,4 @@
+from hashlib import sha1
 from urllib.parse import urlparse
 
 import gitlab
@@ -66,10 +67,11 @@ class InteractiveMRApp(App):
     }
     """
 
-    def __init__(self, merge_request, diffs):
+    def __init__(self, merge_request, diffs, db_connection):
         super().__init__()
         self.merge_request = merge_request
         self.diffs = diffs
+        self.db_connection = db_connection
         self.current_diff_index = 0
         self.comments = {}
         self.user = None
@@ -162,6 +164,15 @@ class InteractiveMRApp(App):
         current_diff = self.diffs[self.current_diff_index]
 
         if cmd == "y":
+            current_diff_path = current_diff["new_path"]
+            current_diff_hash = sha1(current_diff["diff"].encode("utf-8")).hexdigest()
+            cursor = self.db_connection.cursor()
+            cursor.execute(
+                "INSERT INTO diff_hashes (path, hash) VALUES (?, ?)",
+                (current_diff_path, current_diff_hash),
+            )
+            self.db_connection.commit()
+            current_diff["approved"] = True
             self.action_next_diff()
         elif cmd == "c":
             if len(parts) < 3:

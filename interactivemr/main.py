@@ -1,11 +1,17 @@
+import sqlite3
+from hashlib import sha1
+from pathlib import Path
 from urllib.parse import urlparse
 
 import click
 import gitlab
+import platformdirs
 import requests
 
 from .gitlab_client import get_gitlab_instance
 from .tui.app import InteractiveMRApp
+
+APPNAME = "interactivemr"
 
 
 @click.command()
@@ -23,16 +29,54 @@ def main(url, mr):
         parsed_url = urlparse(url)
         gitlab_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         project_path = parsed_url.path.strip("/")
+        db_name = project_path.replace("/", "_")
+
+        # First we'll open/create our database
+        db_path = platformdirs.user_cache_path(
+            appname=APPNAME, ensure_exists=True
+        ) / Path(db_name + ".db")
+        db_connection = sqlite3.connect(db_path)
+
+        # Create our cache-table
+        cursor = db_connection.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS diff_hashes (
+                id INTEGER PRIMARY KEY,
+                path TEXT,
+                hash TEXT
+            )
+        """)
+        db_connection.commit()
 
         gl = get_gitlab_instance(gitlab_url)
 
         project = gl.projects.get(project_path)
         merge_request = project.mergerequests.get(mr)
         changes = merge_request.diffs
-        latest_change = changes.list()[0]  # Hopefully they keep the same order.
+        latest_change = changes.list(get_all=True)[
+            0
+        ]  # Hopefully they keep the same order.
         latest_diffs = changes.get(latest_change.id)
 
-        app = InteractiveMRApp(merge_request=merge_request, diffs=latest_diffs.diffs)
+        unseen_diffs = []
+
+        for diff in latest_diffs.diffs:
+            # Why only SHA1 you ask? Because it's plenty strong enough for this purpose.
+            new_path = diff["new_path"]
+            diff_hash = sha1(diff["diff"].encode("utf-8")).hexdigest()
+            cursor.execute(
+                "SELECT COUNT(*) as count from diff_hashes WHERE path = ? AND hash = ?",
+                (new_path, diff_hash),
+            )
+            (count,) = cursor.fetchone()
+            if count > 0:
+                continue
+
+            unseen_diffs.append(diff)
+
+        app = InteractiveMRApp(
+            merge_request=merge_request, diffs=unseen_diffs, db_connection=db_connection
+        )
         app.run()
 
     except gitlab.exceptions.GitlabError as e:

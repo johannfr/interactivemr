@@ -65,9 +65,13 @@ class DiffView(Widget):
         """Compose the static layout of the diff view."""
         file_path = escape(self.diff_data.get("new_path", "Unknown file"))
         counter_text = f"Diff {self.current_diff_index + 1} of {self.total_diffs}"
+        approved_text = ""
+
+        if "approved" in self.diff_data.keys() and self.diff_data["approved"]:
+            approved_text = " (Approved)"
 
         with Horizontal(classes="diff-header"):
-            yield Static(f"[bold]{file_path}[/bold]", classes="filename")
+            yield Static(f"[bold]{file_path}[/bold]{approved_text}", classes="filename")
             yield Static(counter_text, classes="counter")
 
         with Horizontal(id="diff-container"):
@@ -175,9 +179,7 @@ class DiffView(Widget):
 
                 # Process the collected change blocks
                 removed_ptr, added_ptr = 0, 0
-                while removed_ptr < len(removed_lines) and added_ptr < len(
-                    added_lines
-                ):
+                while removed_ptr < len(removed_lines) and added_ptr < len(added_lines):
                     removed_line = removed_lines[removed_ptr]
                     added_line = added_lines[added_ptr]
                     clean_removed = prepare_string_for_comparison(removed_line)

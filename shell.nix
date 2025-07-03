@@ -12,6 +12,7 @@ pkgs.mkShell {
       pygments
       fuzzywuzzy
       ipython
+      platformdirs
     ]))
   ];
   shellHook = ''
