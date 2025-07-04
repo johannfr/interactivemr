@@ -52,11 +52,10 @@ def main(url, mr):
 
         project = gl.projects.get(project_path)
         merge_request = project.mergerequests.get(mr)
-        changes = merge_request.diffs
-        latest_change = changes.list(get_all=True)[
-            0
-        ]  # Hopefully they keep the same order.
-        latest_diffs = changes.get(latest_change.id)
+        diffs = merge_request.diffs
+        diff_list = diffs.list(get_all=True)
+        latest_change = diff_list[0]  # Hopefully they keep the same order.
+        latest_diffs = diffs.get(latest_change.id)
 
         unseen_diffs = []
 

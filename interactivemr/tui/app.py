@@ -2,6 +2,7 @@ from hashlib import sha1
 from urllib.parse import urlparse
 
 import gitlab
+from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
@@ -269,11 +270,11 @@ class InteractiveMRApp(App):
                 )
             except gitlab.exceptions.GitlabError as e:
                 self.query_one("#status-field", Static).update(
-                    f"[bold red]Error:[/bold red] Failed to post comment after re-authentication: {e}"
+                    f"[bold red]Error:[/bold red] Failed to post comment after re-authentication: {escape(str(e))}"
                 )
         except gitlab.exceptions.GitlabError as e:
             self.query_one("#status-field", Static).update(
-                f"[bold red]Error:[/bold red] Failed to post comment: {e}"
+                f"[bold red]Error:[/bold red] Failed to post comment: {escape(str(e))}"
             )
 
     def action_next_diff(self):
