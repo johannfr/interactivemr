@@ -229,6 +229,7 @@ class InteractiveMRApp(App):
                 "start_sha": self.merge_request.diff_refs["start_sha"],
                 "head_sha": self.merge_request.diff_refs["head_sha"],
                 "position_type": "text",
+                "old_path": diff["old_path"],
                 "new_path": diff["new_path"],
                 "new_line": line_num,
             },
@@ -270,11 +271,11 @@ class InteractiveMRApp(App):
                 )
             except gitlab.exceptions.GitlabError as e:
                 self.query_one("#status-field", Static).update(
-                    f"[bold red]Error:[/bold red] Failed to post comment after re-authentication: {escape(str(e))}"
+                    f"[bold red]Error:[/bold red] Failed to post comment after re-authentication: {e.response_code}"
                 )
         except gitlab.exceptions.GitlabError as e:
             self.query_one("#status-field", Static).update(
-                f"[bold red]Error:[/bold red] Failed to post comment: {escape(str(e))}"
+                f"[bold red]Error:[/bold red] Failed to post comment: {e.response_code}. Note: Commenting on unchanged lines is currently not supported."
             )
 
     def action_next_diff(self):
