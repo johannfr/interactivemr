@@ -48,11 +48,13 @@ def main(url, mr):
         """)
         db_connection.commit()
 
+        click.echo("Connecting to Gitlab.")
         gl = get_gitlab_instance(gitlab_url)
 
         project = gl.projects.get(project_path)
         merge_request = project.mergerequests.get(mr)
         diffs = merge_request.diffs
+        click.echo("Retrieving diffs.")
         diff_list = diffs.list(get_all=True)
         latest_change = diff_list[0]  # Hopefully they keep the same order.
         latest_diffs = diffs.get(latest_change.id)
@@ -73,6 +75,7 @@ def main(url, mr):
 
             unseen_diffs.append(diff)
 
+        click.echo("Processing diffs.")
         app = InteractiveMRApp(
             merge_request=merge_request, diffs=unseen_diffs, db_connection=db_connection
         )
