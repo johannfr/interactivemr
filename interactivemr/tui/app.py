@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from hashlib import sha1
 from urllib.parse import urlparse
 
@@ -9,6 +10,7 @@ from textual.widgets import Footer, Header, Input, Static
 
 from ..gitlab_client import get_gitlab_instance
 from .comment_dialog import CommentDialog
+from .diff_item import DiffItem
 from .diff_view import DiffView
 
 
@@ -138,12 +140,16 @@ class InteractiveMRApp(App):
             old_diff_views.remove()
 
         if not self.diffs:
-            container.mount(Static("No diffs in this merge request."))
+            container.mount(
+                Static(
+                    "No diffs in this merge request or all diffs have been approved."
+                )
+            )
             return
 
-        diff_data = self.diffs[self.current_diff_index]
+        diff_item = self.diffs[self.current_diff_index]
         diff_view = DiffView(
-            diff=diff_data,
+            diff=diff_item,
             current_diff_index=self.current_diff_index,
             total_diffs=len(self.diffs),
             comments=self.comments,
@@ -162,18 +168,20 @@ class InteractiveMRApp(App):
         """Process the user's command."""
         parts = command.split(" ", 2)
         cmd = parts[0]
-        current_diff = self.diffs[self.current_diff_index]
+        current_diff_item = self.diffs[self.current_diff_index]
 
         if cmd == "y":
-            current_diff_path = current_diff["new_path"]
-            current_diff_hash = sha1(current_diff["diff"].encode("utf-8")).hexdigest()
+            current_diff_path = current_diff_item.diff_data["new_path"]
+            current_diff_hash = sha1(
+                current_diff_item.diff_data["diff"].encode("utf-8")
+            ).hexdigest()
             cursor = self.db_connection.cursor()
             cursor.execute(
                 "INSERT INTO diff_hashes (path, hash) VALUES (?, ?)",
                 (current_diff_path, current_diff_hash),
             )
             self.db_connection.commit()
-            current_diff["approved"] = True
+            current_diff_item.approved = True
             self.action_next_diff()
         elif cmd == "c":
             if len(parts) < 3:
@@ -183,7 +191,7 @@ class InteractiveMRApp(App):
                 return
             line_num = int(parts[1])
             comment = parts[2]
-            self.post_comment(current_diff, line_num, comment)
+            self.post_comment(current_diff_item.diff_data, line_num, comment)
         elif cmd == "g":
             if len(parts) < 2:
                 self.query_one("#status-field", Static).update(

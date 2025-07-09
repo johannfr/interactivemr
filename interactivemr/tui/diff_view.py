@@ -12,6 +12,7 @@ from textual.widget import Widget
 from textual.widgets import Rule, Static
 
 from .comment_dialog import CommentDialog
+from .diff_item import DiffItem
 from .diff_parser import parse_diff_to_hunks, prepare_string_for_comparison
 
 FUZZY_THRESHOLD = 60
@@ -44,7 +45,7 @@ class DiffView(Widget):
     SCROLL_STEP = 1
 
     def __init__(
-        self, diff: dict, current_diff_index: int, total_diffs: int, comments: dict
+        self, diff: DiffItem, current_diff_index: int, total_diffs: int, comments: dict
     ):
         """
         Initialize the DiffView.
@@ -56,7 +57,8 @@ class DiffView(Widget):
             comments (dict): A dictionary of comments for the merge request.
         """
         super().__init__()
-        self.diff_data = diff
+        self.diff_item = diff
+        self.diff_data = self.diff_item.diff_data
         self.current_diff_index = current_diff_index
         self.total_diffs = total_diffs
         self.comments = comments
@@ -67,7 +69,7 @@ class DiffView(Widget):
         counter_text = f"Diff {self.current_diff_index + 1} of {self.total_diffs}"
         approved_text = ""
 
-        if "approved" in self.diff_data.keys() and self.diff_data["approved"]:
+        if self.diff_item.approved:
             approved_text = " (Approved)"
 
         with Horizontal(classes="diff-header"):

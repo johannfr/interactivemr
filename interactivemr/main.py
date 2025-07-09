@@ -9,7 +9,7 @@ import platformdirs
 import requests
 
 from .gitlab_client import get_gitlab_instance
-from .tui.app import InteractiveMRApp
+from .tui.app import DiffItem, InteractiveMRApp
 
 APPNAME = "interactivemr"
 
@@ -21,7 +21,10 @@ APPNAME = "interactivemr"
     help="The full repository URL (e.g., https://gitlab.com/user/repo).",
 )
 @click.option("--mr", required=True, type=int, help="The merge request number.")
-def main(url, mr):
+@click.option(
+    "--all", "all_diffs", is_flag=True, default=False, help="Don't filter diff hunks."
+)
+def main(url, mr, all_diffs):
     """
     An interactive MergeRequest code review tool.
     """
@@ -60,9 +63,9 @@ def main(url, mr):
         latest_diffs = diffs.get(latest_change.id)
 
         unseen_diffs = []
-
         for diff in latest_diffs.diffs:
             # Why only SHA1 you ask? Because it's plenty strong enough for this purpose.
+            diff_item = DiffItem(diff_data=diff, approved=False)
             new_path = diff["new_path"]
             diff_hash = sha1(diff["diff"].encode("utf-8")).hexdigest()
             cursor.execute(
@@ -71,9 +74,11 @@ def main(url, mr):
             )
             (count,) = cursor.fetchone()
             if count > 0:
-                continue
+                if not all_diffs:
+                    continue
+                diff_item.approved = True
 
-            unseen_diffs.append(diff)
+            unseen_diffs.append(diff_item)
 
         click.echo("Processing diffs.")
         app = InteractiveMRApp(
