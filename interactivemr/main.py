@@ -9,7 +9,8 @@ import platformdirs
 import requests
 
 from .gitlab_client import get_gitlab_instance
-from .tui.app import DiffItem, InteractiveMRApp
+from .tui.app import InteractiveMRApp
+from .tui.diff_item import DiffItem
 
 APPNAME = "interactivemr"
 
