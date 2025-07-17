@@ -1,16 +1,13 @@
-from dataclasses import dataclass
 from hashlib import sha1
 from urllib.parse import urlparse
 
 import gitlab
-from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Footer, Header, Input, Static
 
 from ..gitlab_client import get_gitlab_instance
 from .comment_dialog import CommentDialog
-from .diff_item import DiffItem
 from .diff_view import DiffView
 
 
@@ -85,7 +82,7 @@ class InteractiveMRApp(App):
         with Container(id="main-container"):
             yield Static(id="status-field")
         yield Input(
-            placeholder="Enter command (y, c <line> <comment>, g <diff-number>)",
+            placeholder="Enter command (y, c <line> <comment>, g <diff-number>, approve)",
             id="command-input",
         )
         yield Footer()
@@ -200,6 +197,13 @@ class InteractiveMRApp(App):
                 return
             goto_diff_number = int(parts[1])
             self.action_goto_diff(goto_diff_number)
+        elif cmd == "approve":
+            self.merge_request.approve()
+            self.query_one("#status-field", Static).update(
+                "[bold green]Approved![/bold green] You have submitted your approval of this merge-request."
+            )
+            self.query_one("#command-input", Input).value = ""
+
         else:
             self.query_one("#status-field", Static).update(
                 f"[bold red]Unknown command:[/bold red] {cmd}"
