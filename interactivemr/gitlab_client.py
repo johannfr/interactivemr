@@ -60,7 +60,7 @@ def get_gitlab_instance(gitlab_url):
     }
     auth_url = f"{gitlab_url}/oauth/authorize?{urlencode(auth_params)}"
 
-    print("Your browser will now open for GitLab authentication.")
+    print(f"Your browser will now open for GitLab authentication: {auth_url}")
     webbrowser.open(auth_url)
 
     with HTTPServer(("localhost", 7890), OAuthCallbackHandler) as httpd:
