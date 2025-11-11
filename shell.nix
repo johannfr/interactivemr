@@ -15,7 +15,4 @@ pkgs.mkShell {
       platformdirs
     ]))
   ];
-  shellHook = ''
-    export PS1="\[\033[01;32m\](interactive-mr)\[\033[00m\] \w$ "
-  '';
 }
