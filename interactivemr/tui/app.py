@@ -174,8 +174,8 @@ class InteractiveMRApp(App):
             ).hexdigest()
             cursor = self.db_connection.cursor()
             cursor.execute(
-                "INSERT INTO diff_hashes (path, hash) VALUES (?, ?)",
-                (current_diff_path, current_diff_hash),
+                "INSERT INTO diff_hashes (mr, path, hash) VALUES (?, ?, ?)",
+                (self.merge_request.iid, current_diff_path, current_diff_hash),
             )
             self.db_connection.commit()
             current_diff_item.approved = True

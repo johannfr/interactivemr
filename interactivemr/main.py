@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 from hashlib import sha1
 from pathlib import Path
 from urllib.parse import urlparse
@@ -46,6 +47,7 @@ def main(url, mr, all_diffs):
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS diff_hashes (
                 id INTEGER PRIMARY KEY,
+                mr INTEGER,
                 path TEXT,
                 hash TEXT
             )
@@ -70,8 +72,8 @@ def main(url, mr, all_diffs):
             new_path = diff["new_path"]
             diff_hash = sha1(diff["diff"].encode("utf-8")).hexdigest()
             cursor.execute(
-                "SELECT COUNT(*) as count from diff_hashes WHERE path = ? AND hash = ?",
-                (new_path, diff_hash),
+                "SELECT COUNT(*) as count from diff_hashes WHERE mr = ? AND path = ? AND hash = ?",
+                (int(mr), new_path, diff_hash),
             )
             (count,) = cursor.fetchone()
             if count > 0:
