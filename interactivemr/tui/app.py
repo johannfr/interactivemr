@@ -11,6 +11,17 @@ from .comment_dialog import CommentDialog
 from .diff_view import DiffView
 
 
+class CommandInput(Input):
+    """Custom Input widget that overrides up/down keys for scrolling."""
+
+    BINDINGS = [
+        ("up", "scroll_up", "Scroll Up"),
+        ("down", "scroll_down", "Scroll Down"),
+        ("pageup", "page_up", "Page Up"),
+        ("pagedown", "page_down", "Page Down"),
+    ]
+
+
 class InteractiveMRApp(App):
     """The main application for the interactive merge request tool."""
 
@@ -19,6 +30,10 @@ class InteractiveMRApp(App):
         ("alt+right", "next_diff", "Next"),
         ("alt+left", "prev_diff", "Previous"),
         ("ctrl+l", "clear_input", "Clear command input"),
+        ("up", "scroll_up", "Scroll Up"),
+        ("down", "scroll_down", "Scroll Down"),
+        ("pageup", "page_up", "Page Up"),
+        ("pagedown", "page_down", "Page Down"),
     ]
 
     CSS = """
@@ -81,7 +96,7 @@ class InteractiveMRApp(App):
         yield Header()
         with Container(id="main-container"):
             yield Static(id="status-field")
-        yield Input(
+        yield CommandInput(
             placeholder="Enter command (y, c <line> <comment>, g <diff-number>, approve)",
             id="command-input",
         )
@@ -289,6 +304,34 @@ class InteractiveMRApp(App):
             self.query_one("#status-field", Static).update(
                 f"[bold red]Error:[/bold red] Failed to post comment: {e.response_code}. Note: Commenting on unchanged lines is currently not supported."
             )
+
+    def action_scroll_up(self):
+        """Scroll the diff view up."""
+        try:
+            self.query_one(DiffView).scroll_up()
+        except Exception:
+            pass
+
+    def action_scroll_down(self):
+        """Scroll the diff view down."""
+        try:
+            self.query_one(DiffView).scroll_down()
+        except Exception:
+            pass
+
+    def action_page_up(self):
+        """Scroll the diff view page up."""
+        try:
+            self.query_one(DiffView).page_up()
+        except Exception:
+            pass
+
+    def action_page_down(self):
+        """Scroll the diff view page down."""
+        try:
+            self.query_one(DiffView).page_down()
+        except Exception:
+            pass
 
     def action_next_diff(self):
         """Go to the next diff."""

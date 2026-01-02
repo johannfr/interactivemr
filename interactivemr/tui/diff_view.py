@@ -283,19 +283,54 @@ class DiffView(Widget):
         self, message: SyncedVertical.SyncScroll
     ) -> None:
         """Handles the custom scroll event to scroll both panes by a fixed step."""
-        old_pane = self.query_one("#old-pane", SyncedVertical)
-        new_pane = self.query_one("#new-pane", SyncedVertical)
-
         if message.direction == "down":
-            new_scroll_y = old_pane.scroll_y + self.SCROLL_STEP
-            old_pane.scroll_y = new_scroll_y
-            new_pane.scroll_y = new_scroll_y
+            self.scroll_panes(self.SCROLL_STEP)
         elif message.direction == "up":
-            new_scroll_y = old_pane.scroll_y - self.SCROLL_STEP
-            old_pane.scroll_y = new_scroll_y
-            new_pane.scroll_y = new_scroll_y
+            self.scroll_panes(-self.SCROLL_STEP)
 
+    def scroll_panes(self, delta: int) -> None:
+        """Scrolls both panes by a given delta."""
+        try:
+            old_pane = self.query_one("#old-pane", SyncedVertical)
+            new_pane = self.query_one("#new-pane", SyncedVertical)
+        except Exception:
+            # If panes are not found, do nothing
+            return
+
+        new_scroll_y = old_pane.scroll_y + delta
+        # Ensure we don't scroll past bounds (Textual handles this but good to be explicit/safe)
+        if new_scroll_y < 0:
+            new_scroll_y = 0
+
+        old_pane.scroll_y = new_scroll_y
+        new_pane.scroll_y = new_scroll_y
         self.refresh()
+
+    def scroll_up(self) -> None:
+        """Scroll up by one step."""
+        self.scroll_panes(-self.SCROLL_STEP)
+
+    def scroll_down(self) -> None:
+        """Scroll down by one step."""
+        self.scroll_panes(self.SCROLL_STEP)
+
+    def page_up(self) -> None:
+        """Scroll up by one page."""
+        try:
+            pane = self.query_one("#old-pane", SyncedVertical)
+            page_size = pane.size.height
+            self.scroll_panes(-page_size)
+        except Exception:
+            pass
+
+    def page_down(self) -> None:
+        """Scroll down by one page."""
+        try:
+            pane = self.query_one("#old-pane", SyncedVertical)
+            page_size = pane.size.height
+            self.scroll_panes(page_size)
+        except Exception:
+            pass
 
     def get_line_number_for_comment(self, diff_line_index: int) -> int:
         """
