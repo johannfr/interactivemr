@@ -4,6 +4,14 @@ from hashlib import sha1
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Apply monkeypatch for Textual/Rich style compatibility
+try:
+    from .monkeypatch import apply_patch
+
+    apply_patch()
+except ImportError:
+    pass
+
 import click
 import gitlab
 import platformdirs
