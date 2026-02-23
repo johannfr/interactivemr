@@ -310,14 +310,14 @@ class InteractiveMRApp(App):
     def action_scroll_up(self):
         """Scroll the diff view up."""
         try:
-            self.query_one(DiffView).scroll_up()
+            self.query_one(DiffView).scroll_up_step()
         except Exception:
             pass
 
     def action_scroll_down(self):
         """Scroll the diff view down."""
         try:
-            self.query_one(DiffView).scroll_down()
+            self.query_one(DiffView).scroll_down_step()
         except Exception:
             pass
 

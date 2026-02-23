@@ -5,5 +5,5 @@ from dataclasses import dataclass
 class DiffItem:
     """Class for storing a diff-item and its metadata"""
 
-    diff_data: str
+    diff_data: dict
     approved: bool
