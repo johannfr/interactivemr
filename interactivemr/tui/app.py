@@ -180,7 +180,9 @@ class InteractiveMRApp(App):
         """Process the user's command."""
         parts = command.split(" ", 2)
         cmd = parts[0]
-        current_diff_item = self.diffs[self.current_diff_index]
+        current_diff_item = (
+            self.diffs[self.current_diff_index] if len(self.diffs) > 0 else 0
+        )
 
         if cmd == "y":
             current_diff_path = current_diff_item.diff_data["new_path"]
