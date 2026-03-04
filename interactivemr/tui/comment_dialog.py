@@ -8,17 +8,17 @@ from textual.widgets import Button, Static
 class CommentDialog(Screen):
     """A dialog to display comments."""
 
-    def __init__(self, comments: list[dict], line_number: int) -> None:
+    def __init__(self, comments: list[dict], title: str) -> None:
         super().__init__()
         self.comments = comments
-        self.line_number = line_number
+        self.title = title
 
     def compose(self) -> ComposeResult:
         comment_texts = [
             f"[bold]{c['author']}:[/bold] {escape(c['body'])}" for c in self.comments
         ]
         yield Grid(
-            Static(f"Comments for line {self.line_number}", id="comment-dialog-title"),
+            Static(self.title, id="comment-dialog-title"),
             Static("\n---\n".join(comment_texts), id="comment-dialog-content"),
             Button("Close", variant="primary", id="comment-dialog-close"),
             id="comment-dialog",

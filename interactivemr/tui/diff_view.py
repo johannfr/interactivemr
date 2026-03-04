@@ -43,7 +43,8 @@ class DiffView(Widget):
     SCROLL_STEP = 1
 
     def __init__(
-        self, diff: DiffItem, current_diff_index: int, total_diffs: int, comments: dict
+        self, diff: DiffItem, current_diff_index: int, total_diffs: int, comments: dict,
+        file_comments: dict | None = None,
     ):
         """
         Initialize the DiffView.
@@ -52,7 +53,8 @@ class DiffView(Widget):
             diff (dict): A dictionary representing a single file change from the GitLab API.
             current_diff_index (int): The index of the current diff.
             total_diffs (int): The total number of diffs.
-            comments (dict): A dictionary of comments for the merge request.
+            comments (dict): A dictionary of line-level comments for the merge request.
+            file_comments (dict | None): A dictionary of file-level comments, keyed by path.
         """
         super().__init__()
         self.diff_item = diff
@@ -60,6 +62,7 @@ class DiffView(Widget):
         self.current_diff_index = current_diff_index
         self.total_diffs = total_diffs
         self.comments = comments
+        self.file_comments = file_comments or {}
 
     def compose(self) -> ComposeResult:
         """Compose the static layout of the diff view."""
@@ -70,8 +73,19 @@ class DiffView(Widget):
         if self.diff_item.approved:
             approved_text = " (Approved)"
 
+        raw_file_path = self.diff_data.get("new_path", "")
+        file_comment_indicator = ""
+        if raw_file_path and raw_file_path in self.file_comments:
+            file_comment_indicator = (
+                f"[@click=app.show_file_comments('{raw_file_path}')]"
+                f"[bold white]C[/bold white][/] "
+            )
+
         with Horizontal(classes="diff-header"):
-            yield Static(f"[bold]{file_path}[/bold]{approved_text}", classes="filename")
+            yield Static(
+                f"{file_comment_indicator}[bold]{file_path}[/bold]{approved_text}",
+                classes="filename",
+            )
             yield Static(counter_text, classes="counter")
 
         with Horizontal(id="diff-container"):
@@ -283,11 +297,17 @@ class DiffView(Widget):
                 new_static.styles.background = "darkgreen"
                 new_pane.mount(new_static)
 
-    def _get_comment_indicator(self, file_path: str | None, line_number: int) -> str:
-        """Returns a comment indicator if a comment exists for the given line."""
+    def _get_comment_indicator(
+        self, file_path: str | None, line_number: int
+    ) -> tuple[str, str] | None:
+        """Returns a clickable comment indicator tuple if a comment exists for the given line.
+
+        Returns:
+            A ``(label, action_string)`` tuple, or ``None`` if no comment exists.
+        """
         if file_path and (file_path, line_number) in self.comments:
-            return f"[@click=app.show_comments('{file_path}',{line_number})][bold white]C[/bold white][/@click] "
-        return "  "
+            return ("C", f"app.show_comments('{file_path}',{line_number})")
+        return None
 
     def on_synced_vertical_sync_scroll(
         self, message: SyncedVertical.SyncScroll

@@ -89,6 +89,7 @@ class InteractiveMRApp(App):
         self.db_connection = db_connection
         self.current_diff_index = 0
         self.comments = {}
+        self.file_comments: dict = {}
         self.user = None
 
     def compose(self) -> ComposeResult:
@@ -97,7 +98,7 @@ class InteractiveMRApp(App):
         with Container(id="main-container"):
             yield Static(id="status-field")
         yield CommandInput(
-            placeholder="Enter command (y, c <line> <comment>, g <diff-number>, approve)",
+            placeholder="Enter command (y, c <line> <comment>, c @file <comment>, g <diff-number>, approve)",
             id="command-input",
         )
         yield Footer()
@@ -122,15 +123,23 @@ class InteractiveMRApp(App):
                         pos = note["position"]
                         # We only care about comments on the new path
                         if pos["new_path"]:
-                            key = (pos["new_path"], pos["new_line"])
-                            if key not in self.comments:
-                                self.comments[key] = []
-                            self.comments[key].append(
-                                {
-                                    "body": note["body"],
-                                    "author": note["author"]["name"],
-                                }
-                            )
+                            new_line = pos.get("new_line")
+                            comment_entry = {
+                                "body": note["body"],
+                                "author": note["author"]["name"],
+                            }
+                            if new_line:
+                                # Line-level comment
+                                key = (pos["new_path"], new_line)
+                                if key not in self.comments:
+                                    self.comments[key] = []
+                                self.comments[key].append(comment_entry)
+                            else:
+                                # File-level comment (no specific line)
+                                file_key = pos["new_path"]
+                                if file_key not in self.file_comments:
+                                    self.file_comments[file_key] = []
+                                self.file_comments[file_key].append(comment_entry)
         except gitlab.exceptions.GitlabError as e:
             self.query_one("#status-field", Static).update(
                 f"[bold red]Error loading comments:[/bold red] {e}"
@@ -165,6 +174,7 @@ class InteractiveMRApp(App):
             current_diff_index=self.current_diff_index,
             total_diffs=len(self.diffs),
             comments=self.comments,
+            file_comments=self.file_comments,
         )
         container.mount(diff_view)
 
@@ -200,12 +210,16 @@ class InteractiveMRApp(App):
         elif cmd == "c":
             if len(parts) < 3:
                 self.query_one("#status-field", Static).update(
-                    "[bold red]Error:[/bold red] 'c' command requires a line number and a comment."
+                    "[bold red]Error:[/bold red] 'c' command requires a target (@file or line number) and a comment."
                 )
                 return
-            line_num = int(parts[1])
-            comment = parts[2]
-            self.post_comment(current_diff_item.diff_data, line_num, comment)
+            if parts[1] == "@file":
+                comment = parts[2]
+                self.post_file_comment(current_diff_item.diff_data, comment)
+            else:
+                line_num = int(parts[1])
+                comment = parts[2]
+                self.post_comment(current_diff_item.diff_data, line_num, comment)
         elif cmd == "g":
             if len(parts) < 2:
                 self.query_one("#status-field", Static).update(
@@ -307,7 +321,60 @@ class InteractiveMRApp(App):
                 f"[bold red]Error:[/bold red] Failed to post comment: {e.response_code}. Note: Commenting on unchanged lines is currently not supported."
             )
 
-    def action_scroll_up(self):
+    def post_file_comment(self, diff, comment_text):
+        """Posts a file-level comment to the GitLab merge request."""
+        comment_data = {
+            "body": comment_text,
+            "position": {
+                "base_sha": self.merge_request.diff_refs["base_sha"],
+                "start_sha": self.merge_request.diff_refs["start_sha"],
+                "head_sha": self.merge_request.diff_refs["head_sha"],
+                "position_type": "file",
+                "old_path": diff["old_path"],
+                "new_path": diff["new_path"],
+            },
+        }
+
+        try:
+            self.merge_request.discussions.create(comment_data)
+            file_key = diff["new_path"]
+            if file_key not in self.file_comments:
+                self.file_comments[file_key] = []
+            self.file_comments[file_key].append(
+                {"body": comment_text, "author": self.user.name if self.user else "You"}
+            )
+            self.show_current_diff()
+            self.query_one("#status-field", Static).update(
+                "[green]Success:[/green] File comment posted."
+            )
+        except gitlab.exceptions.GitlabAuthenticationError:
+            self.query_one("#status-field", Static).update(
+                "[bold yellow]Authentication failed. Attempting to re-authenticate...[/bold yellow]"
+            )
+            self._reauthenticate()
+            try:
+                self.merge_request.discussions.create(comment_data)
+                file_key = diff["new_path"]
+                if file_key not in self.file_comments:
+                    self.file_comments[file_key] = []
+                self.file_comments[file_key].append(
+                    {
+                        "body": comment_text,
+                        "author": self.user.name if self.user else "You",
+                    }
+                )
+                self.show_current_diff()
+                self.query_one("#status-field", Static).update(
+                    "[green]Success:[/green] File comment posted after re-authentication."
+                )
+            except gitlab.exceptions.GitlabError as e:
+                self.query_one("#status-field", Static).update(
+                    f"[bold red]Error:[/bold red] Failed to post file comment after re-authentication: {e.response_code}"
+                )
+        except gitlab.exceptions.GitlabError as e:
+            self.query_one("#status-field", Static).update(
+                f"[bold red]Error:[/bold red] Failed to post file comment: {e.response_code}"
+            )
         """Scroll the diff view up."""
         try:
             self.query_one(DiffView).scroll_up_step()
@@ -375,7 +442,17 @@ class InteractiveMRApp(App):
         """Show a dialog with comments for the given line number."""
         comments = self.comments.get((file_path, line_number), [])
         if comments:
-            self.push_screen(CommentDialog(comments=comments, line_number=line_number))
+            self.push_screen(
+                CommentDialog(comments=comments, title=f"Comments for line {line_number}")
+            )
+
+    def action_show_file_comments(self, file_path: str) -> None:
+        """Show a dialog with file-level comments for the given file."""
+        comments = self.file_comments.get(file_path, [])
+        if comments:
+            self.push_screen(
+                CommentDialog(comments=comments, title=f"File comments: {file_path}")
+            )
 
     def action_clear_input(self):
         """Clear the command input-field."""

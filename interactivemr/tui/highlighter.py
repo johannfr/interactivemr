@@ -373,20 +373,30 @@ def highlight_lines(source_lines: list[str], file_path: str) -> list[LineSpans]:
 
 
 def build_rich_text(
-    line_number: int, line_spans: LineSpans, indicator: str = "  "
+    line_number: int,
+    line_spans: LineSpans,
+    indicator: tuple[str, str] | None = None,
 ) -> Text:
     """Assemble a Rich ``Text`` object from pre-computed highlight spans.
 
     Args:
         line_number: The line number to prepend (left-aligned in 4 chars).
         line_spans: Pre-computed spans for this line from ``highlight_lines()``.
-        indicator: Optional 2-character string inserted after the line number
-            (used for the comment indicator ``"C "``).
+        indicator: Optional ``(label, action_string)`` tuple for a clickable
+            2-character indicator after the line number.  When provided,
+            ``label`` is rendered as a Textual action link (e.g. ``"C "``).
+            When ``None``, two spaces are used to preserve column alignment.
 
     Returns:
         A Rich ``Text`` ready to pass to ``Static()``.
     """
-    text = Text(f"{line_number:<4}{indicator}", overflow="fold")
+    text = Text(f"{line_number:<4}", overflow="fold")
+    if indicator is not None:
+        label, action = indicator
+        text.append(label, style=Style(meta={"@click": action}))
+        text.append(" ")
+    else:
+        text.append("  ")
     for fragment, style in line_spans.spans:
         fragment = fragment.replace("\n", "")
         if fragment:
