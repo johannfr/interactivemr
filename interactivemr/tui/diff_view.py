@@ -76,9 +76,15 @@ class DiffView(Widget):
         raw_file_path = self.diff_data.get("new_path", "")
         file_comment_indicator = ""
         if raw_file_path and raw_file_path in self.file_comments:
+            file_threads = self.file_comments[raw_file_path]
+            any_unresolved = any(
+                c.get("resolvable", False) and not c.get("resolved", False)
+                for c in file_threads
+            )
+            c_color = "yellow" if any_unresolved else "cyan"
             file_comment_indicator = (
                 f"[@click=app.show_file_comments('{raw_file_path}')]"
-                f"[bold white]C[/bold white][/] "
+                f"[bold {c_color}]C[/bold {c_color}][/] "
             )
 
         with Horizontal(classes="diff-header"):
@@ -299,14 +305,22 @@ class DiffView(Widget):
 
     def _get_comment_indicator(
         self, file_path: str | None, line_number: int
-    ) -> tuple[str, str] | None:
+    ) -> tuple[str, str, str] | None:
         """Returns a clickable comment indicator tuple if a comment exists for the given line.
 
         Returns:
-            A ``(label, action_string)`` tuple, or ``None`` if no comment exists.
+            A ``(label, action_string, color)`` tuple, or ``None`` if no comment exists.
+            Color is ``"yellow"`` when any thread on the line is unresolved, ``"cyan"``
+            when all threads are resolved.
         """
         if file_path and (file_path, line_number) in self.comments:
-            return ("C", f"app.show_comments('{file_path}',{line_number})")
+            threads = self.comments[(file_path, line_number)]
+            any_unresolved = any(
+                c.get("resolvable", False) and not c.get("resolved", False)
+                for c in threads
+            )
+            color = "yellow" if any_unresolved else "cyan"
+            return ("C", f"app.show_comments('{file_path}',{line_number})", color)
         return None
 
     def on_synced_vertical_sync_scroll(

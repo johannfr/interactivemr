@@ -1,4 +1,5 @@
 from hashlib import sha1
+import webbrowser
 from urllib.parse import urlparse
 
 import gitlab
@@ -30,6 +31,7 @@ class InteractiveMRApp(App):
         ("alt+right", "next_diff", "Next"),
         ("alt+left", "prev_diff", "Previous"),
         ("ctrl+l", "clear_input", "Clear command input"),
+        ("ctrl+b", "open_in_browser", "Open in browser"),
         ("up", "scroll_up", "Scroll Up"),
         ("down", "scroll_down", "Scroll Down"),
         ("pageup", "page_up", "Page Up"),
@@ -90,6 +92,7 @@ class InteractiveMRApp(App):
         self.current_diff_index = 0
         self.comments = {}
         self.file_comments: dict = {}
+        self.discussion_resolved: dict[str, bool] = {}
         self.user = None
 
     def compose(self) -> ComposeResult:
@@ -115,10 +118,22 @@ class InteractiveMRApp(App):
 
     def _load_comments(self):
         """Loads all discussions for the merge request and stores them."""
+        self.comments = {}
+        self.file_comments = {}
+        self.discussion_resolved = {}
         try:
             discussions = self.merge_request.discussions.list(all=True)
             for discussion in discussions:
-                for note in discussion.attributes["notes"]:
+                discussion_id = discussion.id
+                notes = discussion.attributes["notes"]
+                # The resolved state lives on the first note; all notes in a
+                # thread share the same resolution state.
+                first_note = notes[0] if notes else {}
+                thread_resolved = first_note.get("resolved", False)
+                thread_resolvable = first_note.get("resolvable", False)
+                if thread_resolvable:
+                    self.discussion_resolved[discussion_id] = thread_resolved
+                for note in notes:
                     if "position" in note and note["position"]:
                         pos = note["position"]
                         # We only care about comments on the new path
@@ -127,6 +142,9 @@ class InteractiveMRApp(App):
                             comment_entry = {
                                 "body": note["body"],
                                 "author": note["author"]["name"],
+                                "discussion_id": discussion_id,
+                                "resolvable": thread_resolvable,
+                                "resolved": thread_resolved,
                             }
                             if new_line:
                                 # Line-level comment
@@ -184,6 +202,7 @@ class InteractiveMRApp(App):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle command input."""
         command_text = event.value.strip()
+        self.query_one("#command-input", Input).value = ""
         self.process_command(command_text)
 
     def process_command(self, command: str):
@@ -229,15 +248,48 @@ class InteractiveMRApp(App):
             goto_diff_number = int(parts[1])
             self.action_goto_diff(goto_diff_number)
         elif cmd == "approve":
-            self.merge_request.approve()
-            self.query_one("#status-field", Static).update(
-                "[bold green]Approved![/bold green] You have submitted your approval of this merge-request."
+            unresolved_count = sum(
+                1 for resolved in self.discussion_resolved.values() if not resolved
             )
-            self.query_one("#command-input", Input).value = ""
+            if unresolved_count > 0:
+                self.query_one("#status-field", Static).update(
+                    f"[bold yellow]Warning:[/bold yellow] {unresolved_count} unresolved "
+                    "thread(s). Resolve them or type [bold]approve![/bold] to override."
+                )
+                return
+            self._do_approve()
+        elif cmd == "approve!":
+            self._do_approve()
 
         else:
             self.query_one("#status-field", Static).update(
                 f"[bold red]Unknown command:[/bold red] {cmd}"
+            )
+
+    def _do_approve(self) -> None:
+        """Call the GitLab approve API, with reauth-and-retry on 401."""
+        try:
+            self.merge_request.approve()
+            self.query_one("#status-field", Static).update(
+                "[bold green]Approved![/bold green] You have submitted your approval of this merge-request."
+            )
+        except gitlab.exceptions.GitlabAuthenticationError:
+            self.query_one("#status-field", Static).update(
+                "[bold yellow]Authentication failed. Attempting to re-authenticate...[/bold yellow]"
+            )
+            self._reauthenticate()
+            try:
+                self.merge_request.approve()
+                self.query_one("#status-field", Static).update(
+                    "[bold green]Approved![/bold green] You have submitted your approval of this merge-request."
+                )
+            except gitlab.exceptions.GitlabError as e:
+                self.query_one("#status-field", Static).update(
+                    f"[bold red]Error:[/bold red] Failed to approve after re-authentication: {e.response_code}"
+                )
+        except gitlab.exceptions.GitlabError as e:
+            self.query_one("#status-field", Static).update(
+                f"[bold red]Error:[/bold red] Failed to approve: {e.response_code}"
             )
 
     def _reauthenticate(self):
@@ -280,13 +332,9 @@ class InteractiveMRApp(App):
 
         try:
             self.merge_request.discussions.create(comment_data)
-            # Add the comment to our local store and refresh the view
-            key = (diff["new_path"], line_num)
-            if key not in self.comments:
-                self.comments[key] = []
-            self.comments[key].append(
-                {"body": comment_text, "author": self.user.name if self.user else "You"}
-            )
+            # Reload all comments from the API so the new discussion gets its
+            # ID and resolution state, then refresh the view.
+            self._load_comments()
             self.show_current_diff()
             self.query_one("#status-field", Static).update(
                 f"[green]Success:[/green] Comment posted to line {line_num}."
@@ -299,15 +347,7 @@ class InteractiveMRApp(App):
             # Retry posting the comment after re-authentication
             try:
                 self.merge_request.discussions.create(comment_data)
-                key = (diff["new_path"], line_num)
-                if key not in self.comments:
-                    self.comments[key] = []
-                self.comments[key].append(
-                    {
-                        "body": comment_text,
-                        "author": self.user.name if self.user else "You",
-                    }
-                )
+                self._load_comments()
                 self.show_current_diff()
                 self.query_one("#status-field", Static).update(
                     f"[green]Success:[/green] Comment posted to line {line_num} after re-authentication."
@@ -337,12 +377,7 @@ class InteractiveMRApp(App):
 
         try:
             self.merge_request.discussions.create(comment_data)
-            file_key = diff["new_path"]
-            if file_key not in self.file_comments:
-                self.file_comments[file_key] = []
-            self.file_comments[file_key].append(
-                {"body": comment_text, "author": self.user.name if self.user else "You"}
-            )
+            self._load_comments()
             self.show_current_diff()
             self.query_one("#status-field", Static).update(
                 "[green]Success:[/green] File comment posted."
@@ -354,15 +389,7 @@ class InteractiveMRApp(App):
             self._reauthenticate()
             try:
                 self.merge_request.discussions.create(comment_data)
-                file_key = diff["new_path"]
-                if file_key not in self.file_comments:
-                    self.file_comments[file_key] = []
-                self.file_comments[file_key].append(
-                    {
-                        "body": comment_text,
-                        "author": self.user.name if self.user else "You",
-                    }
-                )
+                self._load_comments()
                 self.show_current_diff()
                 self.query_one("#status-field", Static).update(
                     "[green]Success:[/green] File comment posted after re-authentication."
@@ -375,6 +402,8 @@ class InteractiveMRApp(App):
             self.query_one("#status-field", Static).update(
                 f"[bold red]Error:[/bold red] Failed to post file comment: {e.response_code}"
             )
+
+    def action_scroll_up(self):
         """Scroll the diff view up."""
         try:
             self.query_one(DiffView).scroll_up_step()
@@ -401,6 +430,10 @@ class InteractiveMRApp(App):
             self.query_one(DiffView).page_down()
         except Exception:
             pass
+
+    def action_open_in_browser(self) -> None:
+        """Open the current merge request in the default web browser."""
+        webbrowser.open(self.merge_request.web_url)
 
     def action_next_diff(self):
         """Go to the next diff."""
@@ -443,7 +476,11 @@ class InteractiveMRApp(App):
         comments = self.comments.get((file_path, line_number), [])
         if comments:
             self.push_screen(
-                CommentDialog(comments=comments, title=f"Comments for line {line_number}")
+                CommentDialog(
+                    comments=comments,
+                    title=f"Comments for line {line_number}",
+                    merge_request=self.merge_request,
+                )
             )
 
     def action_show_file_comments(self, file_path: str) -> None:
@@ -451,7 +488,11 @@ class InteractiveMRApp(App):
         comments = self.file_comments.get(file_path, [])
         if comments:
             self.push_screen(
-                CommentDialog(comments=comments, title=f"File comments: {file_path}")
+                CommentDialog(
+                    comments=comments,
+                    title=f"File comments: {file_path}",
+                    merge_request=self.merge_request,
+                )
             )
 
     def action_clear_input(self):
