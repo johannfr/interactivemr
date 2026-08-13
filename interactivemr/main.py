@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import sys
 from hashlib import sha1
@@ -53,9 +54,9 @@ def _resolve_scope(gl: gitlab.Gitlab, project_path: str):
 def _open_db_for_project(project_path: str) -> tuple[sqlite3.Connection, object]:
     """Open (or create) the SQLite diff-cache for a specific project path."""
     db_name = project_path.replace("/", "_")
-    db_path = platformdirs.user_cache_path(
-        appname=APPNAME, ensure_exists=True
-    ) / Path(db_name + ".db")
+    db_path = platformdirs.user_cache_path(appname=APPNAME, ensure_exists=True) / Path(
+        db_name + ".db"
+    )
     db_connection = sqlite3.connect(db_path)
     cursor = db_connection.cursor()
     cursor.execute("""
@@ -86,6 +87,14 @@ def _run_review(gl, project_path: str, mr_iid: int, all_diffs: bool) -> None:
 
     unseen_diffs = []
     for diff in latest_diffs.diffs:
+        diff_text = diff["diff"]
+        if diff["new_path"].lower().endswith(".svg"):
+            continue
+        if (
+            len(diff_text.splitlines()) == 1
+            and re.match(r"^Binary files .+ and .+ differ\n?$", diff_text)
+        ):
+            continue
         diff_item = DiffItem(diff_data=diff, approved=False)
         new_path = diff["new_path"]
         diff_hash = sha1(diff["diff"].encode("utf-8")).hexdigest()
